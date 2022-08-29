@@ -302,7 +302,12 @@ public interface OpenLineageDao extends BaseDao {
               jobName,
               location,
               jobContext.getUuid());
-      runFacetsDao.insertRunFacetsFor(UUID.randomUUID(), now, now,event.getEventType(), event.getRun().getFacets());
+      // Add ...
+      Optional.ofNullable(event.getRun().getFacets())
+          .ifPresent(
+              runFacet ->
+                  runFacetsDao.insertRunFacetsFor(
+                      runUuid, now, event.getEventType(), event.getRun().getFacets()));
     } else {
       run =
           runDao.upsert(
