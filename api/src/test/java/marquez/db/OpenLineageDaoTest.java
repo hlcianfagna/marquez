@@ -146,7 +146,6 @@ class OpenLineageDaoTest {
                     new SchemaField("eyeColor", "STRING", "my eye color"))),
             this.datasetFacets.getLifecycleStateChange(),
             this.datasetFacets.getDataSource(),
-            this.datasetFacets.getDescription(),
             this.datasetFacets.getAdditionalFacets());
     UpdateLineageRow readJob =
         LineageTestUtils.createLineageRow(
