@@ -105,6 +105,7 @@ public interface OpenLineageDao extends BaseDao {
     JobContextDao jobContextDao = createJobContextDao();
     DatasetVersionDao datasetVersionDao = createDatasetVersionDao();
     DatasetFieldDao datasetFieldDao = createDatasetFieldDao();
+    DatasetFacetsDao datasetFacetsDao = createDatasetFacetsDao();
     RunDao runDao = createRunDao();
     RunArgsDao runArgsDao = createRunArgsDao();
     RunStateDao runStateDao = createRunStateDao();
@@ -337,10 +338,10 @@ public interface OpenLineageDao extends BaseDao {
     List<DatasetRecord> datasetInputs = null;
     if (event.getInputs() != null) {
       datasetInputs = new ArrayList<>();
-      for (Dataset ds : event.getInputs()) {
+      for (Dataset dataset : event.getInputs()) {
         DatasetRecord record =
             upsertLineageDataset(
-                ds,
+                dataset,
                 now,
                 runUuid,
                 true,
@@ -351,6 +352,17 @@ public interface OpenLineageDao extends BaseDao {
                 datasetFieldDao,
                 runDao);
         datasetInputs.add(record);
+
+        // Facets ...
+        Optional.ofNullable(dataset.getFacets())
+            .ifPresent(
+                facets ->
+                    datasetFacetsDao.insertDatasetFacetsFor(
+                        record.getDatasetRow().getUuid(),
+                        runUuid,
+                        now,
+                        event.getEventType(),
+                        facets));
       }
     }
     bag.setInputs(Optional.ofNullable(datasetInputs));
@@ -358,10 +370,10 @@ public interface OpenLineageDao extends BaseDao {
     List<DatasetRecord> datasetOutputs = null;
     if (event.getOutputs() != null) {
       datasetOutputs = new ArrayList<>();
-      for (Dataset ds : event.getOutputs()) {
+      for (Dataset dataset : event.getOutputs()) {
         DatasetRecord record =
             upsertLineageDataset(
-                ds,
+                dataset,
                 now,
                 runUuid,
                 false,
@@ -372,6 +384,17 @@ public interface OpenLineageDao extends BaseDao {
                 datasetFieldDao,
                 runDao);
         datasetOutputs.add(record);
+
+        // Facets ...
+        Optional.ofNullable(dataset.getFacets())
+            .ifPresent(
+                facets ->
+                    datasetFacetsDao.insertDatasetFacetsFor(
+                        record.getDatasetRow().getUuid(),
+                        runUuid,
+                        now,
+                        event.getEventType(),
+                        facets));
       }
     }
 
@@ -524,22 +547,6 @@ public interface OpenLineageDao extends BaseDao {
                           dsNamespace.getName(),
                           ds.getName(),
                           dslifecycleState);
-                  // TODO ...
-
-                  createDatasetVersionFacetsDao()
-                      .upsertDatasetVersionFacet(
-                          UUID.randomUUID(),
-                          versionUuid,
-                          "dataSource",
-                          toPgObject(ds.getFacets().getDataSource()));
-                  createDatasetVersionFacetsDao()
-                      .upsertDatasetVersionFacet(
-                          UUID.randomUUID(),
-                          versionUuid,
-                          "schema",
-                          toPgObject(ds.getFacets().getSchema()));
-
-                  // ...
                   return row;
                 });
     List<DatasetFieldMapping> datasetFieldMappings = new ArrayList<>();
@@ -666,28 +673,6 @@ public interface OpenLineageDao extends BaseDao {
       return jsonObject;
     } catch (Exception e) {
       throw new RuntimeException("Could write lineage event to db", e);
-    }
-  }
-
-  default PGobject toPgObject(LineageEvent.DatasourceDatasetFacet datasourceDatasetFacet) {
-    try {
-      PGobject jsonObject = new PGobject();
-      jsonObject.setType("json");
-      jsonObject.setValue(Utils.getMapper().writeValueAsString(datasourceDatasetFacet));
-      return jsonObject;
-    } catch (Exception e) {
-      return null;
-    }
-  }
-
-  default PGobject toPgObject(LineageEvent.SchemaDatasetFacet schemaDatasetFacet) {
-    try {
-      PGobject jsonObject = new PGobject();
-      jsonObject.setType("json");
-      jsonObject.setValue(Utils.getMapper().writeValueAsString(schemaDatasetFacet));
-      return jsonObject;
-    } catch (Exception e) {
-      return null;
     }
   }
 }

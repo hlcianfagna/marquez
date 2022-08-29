@@ -52,11 +52,5 @@ public interface BaseDao extends SqlObject {
   OpenLineageDao createOpenLineageDao();
 
   @CreateSqlObject
-  DatasetVersionFacetsDao createDatasetVersionFacetsDao();
-
-  @CreateSqlObject
-  JobVersionFacetsDao createJobVersionFacetsDao();
-
-  @CreateSqlObject
-  RunFacetsDao createRunFacetsDao();
+  DatasetFacetsDao createDatasetFacetsDao();
 }

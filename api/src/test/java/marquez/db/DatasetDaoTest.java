@@ -69,6 +69,7 @@ class DatasetDaoTest {
           handle.execute("DELETE FROM runs_input_mapping");
           handle.execute("DELETE FROM dataset_versions_field_mapping");
           handle.execute("DELETE FROM dataset_versions");
+          handle.execute("DELETE FROM dataset_facets");
           handle.execute("UPDATE runs SET start_run_state_uuid=NULL, end_run_state_uuid=NULL");
           handle.execute("DELETE FROM run_states");
           handle.execute("DELETE FROM runs");
@@ -124,12 +125,11 @@ class DatasetDaoTest {
             marquez.service.models.Dataset::getFacets,
             InstanceOfAssertFactories.map(String.class, Object.class))
         .isNotEmpty()
-        .hasSize(7)
+        .hasSize(6)
         .containsKeys(
             "documentation",
             "schema",
             "dataSource",
-            "description",
             "writeFacet",
             "inputFacet",
             "anotherInputFacet");
@@ -251,9 +251,8 @@ class DatasetDaoTest {
             marquez.service.models.Dataset::getFacets,
             InstanceOfAssertFactories.map(String.class, Object.class))
         .isNotEmpty()
-        .hasSize(6)
-        .containsKeys(
-            "documentation", "description", "schema", "dataSource", "writeFacet", "inputFacet")
+        .hasSize(5)
+        .containsKeys("documentation", "schema", "dataSource", "writeFacet", "inputFacet")
         .containsEntry(
             "writeFacet",
             ImmutableMap.of(
@@ -328,9 +327,8 @@ class DatasetDaoTest {
             marquez.service.models.Dataset::getFacets,
             InstanceOfAssertFactories.map(String.class, Object.class))
         .isNotEmpty()
-        .hasSize(6)
-        .containsKeys(
-            "documentation", "description", "schema", "dataSource", "writeFacet", "inputFacet")
+        .hasSize(5)
+        .containsKeys("documentation", "schema", "dataSource", "writeFacet", "inputFacet")
         .containsEntry(
             "writeFacet",
             ImmutableMap.of(
@@ -356,9 +354,8 @@ class DatasetDaoTest {
             marquez.service.models.Dataset::getFacets,
             InstanceOfAssertFactories.map(String.class, Object.class))
         .isNotEmpty()
-        .hasSize(6)
-        .containsKeys(
-            "documentation", "description", "schema", "dataSource", "writeFacet", "inputFacet")
+        .hasSize(5)
+        .containsKeys("documentation", "schema", "dataSource", "writeFacet", "inputFacet")
         .containsEntry(
             "writeFacet",
             ImmutableMap.of(
@@ -445,9 +442,8 @@ class DatasetDaoTest {
             marquez.service.models.Dataset::getFacets,
             InstanceOfAssertFactories.map(String.class, Object.class))
         .isNotEmpty()
-        .hasSize(6)
-        .containsKeys(
-            "documentation", "description", "schema", "dataSource", "writeFacet", "inputFacet")
+        .hasSize(5)
+        .containsKeys("documentation", "schema", "dataSource", "writeFacet", "inputFacet")
         .containsEntry(
             "writeFacet",
             ImmutableMap.of(
