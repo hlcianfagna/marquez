@@ -325,7 +325,6 @@ public class LineageEvent extends BaseJsonModel {
     @Valid private SchemaDatasetFacet schema;
     @Valid private LifecycleStateChangeFacet lifecycleStateChange;
     @Valid private DatasourceDatasetFacet dataSource;
-    private String description;
     @Builder.Default @JsonIgnore private Map<String, Object> additional = new LinkedHashMap<>();
 
     @JsonAnySetter
@@ -352,10 +351,6 @@ public class LineageEvent extends BaseJsonModel {
 
     public DatasourceDatasetFacet getDataSource() {
       return dataSource;
-    }
-
-    public String getDescription() {
-      return description;
     }
   }
 
