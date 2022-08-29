@@ -109,6 +109,7 @@ public interface OpenLineageDao extends BaseDao {
     RunDao runDao = createRunDao();
     RunArgsDao runArgsDao = createRunArgsDao();
     RunStateDao runStateDao = createRunStateDao();
+    RunFacetsDao runFacetsDao = createRunFacetsDao();
 
     Instant now = event.getEventTime().withZoneSameInstant(ZoneId.of("UTC")).toInstant();
 
@@ -301,6 +302,7 @@ public interface OpenLineageDao extends BaseDao {
               jobName,
               location,
               jobContext.getUuid());
+      runFacetsDao.insertRunFacetsFor(UUID.randomUUID(), now, now,event.getEventType(), event.getRun().getFacets());
     } else {
       run =
           runDao.upsert(
