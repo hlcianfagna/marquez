@@ -58,14 +58,14 @@ public interface JobDao extends BaseDao {
           LEFT OUTER JOIN job_versions AS jv ON jv.uuid = j.current_version_uuid
           LEFT OUTER JOIN job_contexts jc ON jc.uuid = j.current_job_context_uuid
           LEFT OUTER JOIN (
-            SELECT run_uuid, JSON_AGG(e.facets) AS facets
+            SELECT run_uuid, JSON_AGG(e.facet) AS facets
             FROM (
-              SELECT run_uuid, event->'job'->'facets' AS facets
-              FROM lineage_events AS le
-              INNER JOIN job_versions jv2 ON jv2.latest_run_uuid=le.run_uuid
+              SELECT jf.run_uuid, jf.facet
+              FROM job_facets AS jf
+              INNER JOIN job_versions jv2 ON jv2.latest_run_uuid=jf.run_uuid
               INNER JOIN jobs_view j2 ON j2.current_version_uuid=jv2.uuid
               WHERE j2.name=:jobName AND j2.namespace_name=:namespaceName
-              ORDER BY event_time ASC
+              ORDER BY lineage_event_time ASC
             ) e
             GROUP BY e.run_uuid
           ) f ON f.run_uuid=jv.latest_run_uuid
@@ -110,14 +110,14 @@ public interface JobDao extends BaseDao {
           + "  LEFT OUTER JOIN job_versions AS jv ON jv.uuid = j.current_version_uuid\n"
           + "  LEFT OUTER JOIN job_contexts jc ON jc.uuid = j.current_job_context_uuid\n"
           + "LEFT OUTER JOIN (\n"
-          + "      SELECT run_uuid, JSON_AGG(e.facets) AS facets\n"
+          + "      SELECT run_uuid, JSON_AGG(e.facet) AS facets\n"
           + "      FROM (\n"
-          + "       SELECT run_uuid, event->'job'->'facets' AS facets\n"
-          + "       FROM lineage_events AS le\n"
-          + "       INNER JOIN job_versions jv2 ON jv2.latest_run_uuid=le.run_uuid\n"
+          + "       SELECT jf.run_uuid, jf.facet\n"
+          + "       FROM job_facets AS jf\n"
+          + "       INNER JOIN job_versions jv2 ON jv2.latest_run_uuid=jf.run_uuid\n"
           + "       INNER JOIN jobs_view j2 ON j2.current_version_uuid=jv2.uuid\n"
           + "       WHERE j2.namespace_name=:namespaceName\n"
-          + "       ORDER BY event_time ASC\n"
+          + "       ORDER BY lineage_event_time ASC\n"
           + "   ) e\n"
           + "    GROUP BY e.run_uuid\n"
           + "  ) f ON f.run_uuid=jv.latest_run_uuid\n"

@@ -103,6 +103,7 @@ public interface OpenLineageDao extends BaseDao {
     SourceDao sourceDao = createSourceDao();
     JobDao jobDao = createJobDao();
     JobContextDao jobContextDao = createJobContextDao();
+    JobFacetsDao jobFacetsDao = createJobFacetsDao();
     DatasetVersionDao datasetVersionDao = createDatasetVersionDao();
     DatasetFieldDao datasetFieldDao = createDatasetFieldDao();
     DatasetFacetsDao datasetFacetsDao = createDatasetFacetsDao();
@@ -280,7 +281,7 @@ public interface OpenLineageDao extends BaseDao {
             UUID.randomUUID(), now, Utils.toJson(runArgsMap), Utils.checksumFor(runArgsMap));
     bag.setRunArgs(runArgs);
 
-    UUID runUuid = runToUuid(event.getRun().getRunId());
+    final UUID runUuid = runToUuid(event.getRun().getRunId());
 
     RunRow run;
     if (event.getEventType() != null) {
@@ -340,6 +341,13 @@ public interface OpenLineageDao extends BaseDao {
         runDao.updateStartState(run.getUuid(), now, runState.getUuid());
       }
     }
+
+    // Add ...
+    Optional.ofNullable(event.getJob().getFacets())
+        .ifPresent(
+            jobFacet ->
+                jobFacetsDao.insertJobFacetsFor(
+                    job.getUuid(), runUuid, now, event.getEventType(), event.getJob().getFacets()));
 
     // RunInput list uses null as a sentinel value
     List<DatasetRecord> datasetInputs = null;
