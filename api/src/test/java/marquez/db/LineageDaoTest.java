@@ -29,18 +29,18 @@ import java.util.stream.Stream;
 import marquez.common.models.JobType;
 import marquez.db.LineageTestUtils.DatasetConsumerJob;
 import marquez.db.LineageTestUtils.JobLineage;
-import marquez.db.models.DatasetData;
-import marquez.db.models.JobData;
 import marquez.db.models.JobRow;
 import marquez.db.models.NamespaceRow;
 import marquez.db.models.UpdateLineageRow;
 import marquez.jdbi.MarquezJdbiExternalPostgresExtension;
+import marquez.service.models.DatasetData;
+import marquez.service.models.JobData;
 import marquez.service.models.LineageEvent;
 import marquez.service.models.LineageEvent.Dataset;
 import marquez.service.models.LineageEvent.JobFacet;
 import marquez.service.models.LineageEvent.SchemaField;
 import marquez.service.models.LineageEvent.SourceCodeLocationJobFacet;
-import marquez.service.models.Run;
+import marquez.service.models.RunData;
 import org.assertj.core.api.InstanceOfAssertFactories;
 import org.assertj.core.api.ObjectAssert;
 import org.jdbi.v3.core.Jdbi;
@@ -734,7 +734,7 @@ public class LineageDaoTest {
                 Stream.of(writeJob.getJob().getUuid()), newRows.stream().map(JobLineage::getId))
             .collect(Collectors.toSet());
 
-    List<Run> currentRuns = lineageDao.getCurrentRuns(jobids);
+    List<RunData> currentRuns = lineageDao.getCurrentRuns(jobids);
 
     // assert the job does exist
     assertThat(currentRuns)
@@ -751,7 +751,7 @@ public class LineageDaoTest {
 
     Set<UUID> jobids = Collections.singleton(writeJob.getJob().getUuid());
 
-    List<Run> currentRuns = lineageDao.getCurrentRuns(jobids);
+    List<RunData> currentRuns = lineageDao.getCurrentRuns(jobids);
 
     // assert the job does exist
     assertThat(currentRuns)
@@ -794,7 +794,7 @@ public class LineageDaoTest {
                 Stream.of(writeJob.getJob().getUuid()), newRows.stream().map(JobLineage::getId))
             .collect(Collectors.toSet());
 
-    List<Run> currentRuns = lineageDao.getCurrentRuns(jobids);
+    List<RunData> currentRuns = lineageDao.getCurrentRuns(jobids);
 
     // assert the job does exist
     assertThat(currentRuns)

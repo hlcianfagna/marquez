@@ -25,17 +25,17 @@ import marquez.common.models.DatasetId;
 import marquez.common.models.JobId;
 import marquez.db.JobDao;
 import marquez.db.LineageDao;
-import marquez.db.models.DatasetData;
-import marquez.db.models.JobData;
 import marquez.db.models.JobRow;
 import marquez.service.DelegatingDaos.DelegatingLineageDao;
+import marquez.service.models.DatasetData;
 import marquez.service.models.Edge;
 import marquez.service.models.Graph;
+import marquez.service.models.JobData;
 import marquez.service.models.Lineage;
 import marquez.service.models.Node;
 import marquez.service.models.NodeId;
 import marquez.service.models.NodeType;
-import marquez.service.models.Run;
+import marquez.service.models.RunData;
 
 @Slf4j
 public class LineageService extends DelegatingLineageDao {
@@ -55,12 +55,12 @@ public class LineageService extends DelegatingLineageDao {
 
     Set<JobData> jobData = getLineage(Collections.singleton(job), depth);
 
-    List<Run> runs =
+    List<RunData> runs =
         getCurrentRuns(jobData.stream().map(JobData::getUuid).collect(Collectors.toSet()));
     // todo fix runtime
     for (JobData j : jobData) {
       if (j.getLatestRun().isEmpty()) {
-        for (Run run : runs) {
+        for (RunData run : runs) {
           if (j.getName().getValue().equalsIgnoreCase(run.getJobName())
               && j.getNamespace().getValue().equalsIgnoreCase(run.getNamespaceName())) {
             j.setLatestRun(run);

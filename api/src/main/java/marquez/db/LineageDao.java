@@ -13,17 +13,17 @@ import java.util.UUID;
 import marquez.db.mappers.DatasetDataMapper;
 import marquez.db.mappers.JobDataMapper;
 import marquez.db.mappers.JobRowMapper;
-import marquez.db.mappers.RunMapper;
-import marquez.db.models.DatasetData;
-import marquez.db.models.JobData;
-import marquez.service.models.Run;
+import marquez.db.mappers.RunDataMapper;
+import marquez.service.models.DatasetData;
+import marquez.service.models.JobData;
+import marquez.service.models.RunData;
 import org.jdbi.v3.sqlobject.config.RegisterRowMapper;
 import org.jdbi.v3.sqlobject.customizer.BindList;
 import org.jdbi.v3.sqlobject.statement.SqlQuery;
 
 @RegisterRowMapper(DatasetDataMapper.class)
 @RegisterRowMapper(JobDataMapper.class)
-@RegisterRowMapper(RunMapper.class)
+@RegisterRowMapper(RunDataMapper.class)
 @RegisterRowMapper(JobRowMapper.class)
 public interface LineageDao {
 
@@ -121,5 +121,5 @@ public interface LineageDao {
           + "    WHERE run_uuid=r.uuid\n"
           + "    GROUP BY run_uuid\n"
           + ") ro ON ro.run_uuid=r.uuid")
-  List<Run> getCurrentRuns(@BindList Collection<UUID> jobUuid);
+  List<RunData> getCurrentRuns(@BindList Collection<UUID> jobUuid);
 }
