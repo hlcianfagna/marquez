@@ -28,7 +28,7 @@ The `event` column contains the raw OpenLineage event. When Marquez handles the 
 
 OpenLineage's core model is extensible via _facets_. A `facet` is user-defined metadata and enables entity enrichment. Initially, returning dataset, job, and run facets via the REST API was not supported, but eventually added in release [`0.14.0`](https://github.com/MarquezProject/marquez/compare/0.13.1...0.14.0). The implementation was simple: when querying the `datasets`, `jobs`, or `runs` tables, also query the `lineage_events` table for facets.
 
-We knew the initial implementation would have to be revisited eventually. That is, the `lineage_events` table may have multiple events for a given `run_uuid` that can easily exceed **>** **`10MBs`** per event, resulting in out-of-memory (OOM) errors as facet queries require first loading the raw `event` in memory, then filtering for any relevant facets. For example, the query snippet below is used to query the `datasets` table:
+We knew the initial implementation would have to be revisited eventually. That is, the `lineage_events` table may have multiple events for a given `run_uuid` that can easily exceed **>** **`10MBs`** per event, resulting in out-of-memory ([OOM](https://github.com/OpenLineage/OpenLineage/issues/316)) errors as facet queries require first loading the raw `event` in memory, then filtering for any relevant facets. For example, the query snippet below is used to query the `datasets` table:
 
 ```sql
 .
@@ -63,6 +63,7 @@ To improve query performance for facets, and avoid querying the `lineage_events`
 |--------------------|---------------|
 | uuid **(PK)**      | `UUID`        |
 | created_at         | `TIMESTAMPTZ` |
+| dataset_uuid       | `UUID`        |
 | run_uuid           | `UUID`        |
 | lineage_event_time | `TIMESTAMPTZ` |
 | lineage_event_type | `VARCHAR`     |
@@ -80,6 +81,7 @@ To improve query performance for facets, and avoid querying the `lineage_events`
 |--------------------|---------------|
 | uuid **(PK)**      | `UUID`        |
 | created_at         | `TIMESTAMPTZ` |
+| job_uuid           | `UUID`        |
 | run_uuid           | `UUID`        |
 | lineage_event_time | `TIMESTAMPTZ` |
 | lineage_event_type | `VARCHAR`     |
