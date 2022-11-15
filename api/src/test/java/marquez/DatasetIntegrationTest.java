@@ -5,13 +5,18 @@
 
 package marquez;
 
+import static marquez.db.ColumnLineageTestUtils.getDatasetA;
+import static marquez.db.ColumnLineageTestUtils.getDatasetB;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
+import java.io.IOException;
 import java.net.http.HttpResponse;
+import java.time.Instant;
+import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.util.Collections;
 import java.util.List;
@@ -19,6 +24,8 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import marquez.api.JdbiUtils;
+import marquez.client.models.ColumnLineage;
 import marquez.client.models.Dataset;
 import marquez.client.models.DatasetId;
 import marquez.client.models.DatasetVersion;
@@ -29,12 +36,17 @@ import marquez.client.models.RunMeta;
 import marquez.client.models.StreamVersion;
 import marquez.common.Utils;
 import marquez.db.LineageTestUtils;
+import marquez.jdbi.MarquezJdbiExternalPostgresExtension;
 import marquez.service.models.LineageEvent;
+import org.jdbi.v3.core.Jdbi;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 @org.junit.jupiter.api.Tag("IntegrationTests")
+@ExtendWith(MarquezJdbiExternalPostgresExtension.class)
 public class DatasetIntegrationTest extends BaseIntegrationTest {
 
   @BeforeEach
@@ -42,6 +54,11 @@ public class DatasetIntegrationTest extends BaseIntegrationTest {
     createNamespace(NAMESPACE_NAME);
     createSource(DB_TABLE_SOURCE_NAME);
     createSource(STREAM_SOURCE_NAME);
+  }
+
+  @AfterEach
+  public void tearDown(Jdbi jdbi) {
+    JdbiUtils.cleanDatabase(jdbi);
   }
 
   @Test
@@ -356,5 +373,126 @@ public class DatasetIntegrationTest extends BaseIntegrationTest {
     Dataset dataset2 = client.createDataset(NAMESPACE_NAME, DB_TABLE_NAME, WO_DESCRIPTION);
     // Description stays
     assertThat(dataset2.getDescription()).isEqualTo(DESCRIPTION.getDescription());
+  }
+
+  @Test
+  public void testApp_doesNotShowDeletedDataset() throws IOException {
+    String namespace = "namespace";
+    String name = "table";
+    LineageEvent event =
+        new LineageEvent(
+            "COMPLETE",
+            Instant.now().atZone(ZoneId.systemDefault()),
+            new LineageEvent.Run(UUID.randomUUID().toString(), null),
+            new LineageEvent.Job("namespace", "job_name", null),
+            List.of(new LineageEvent.Dataset(namespace, name, LineageTestUtils.newDatasetFacet())),
+            Collections.emptyList(),
+            "the_producer");
+
+    final CompletableFuture<Integer> resp =
+        this.sendLineage(Utils.toJson(event))
+            .thenApply(HttpResponse::statusCode)
+            .whenComplete(
+                (val, error) -> {
+                  if (error != null) {
+                    Assertions.fail("Could not complete request");
+                  }
+                });
+
+    // Ensure the event was correctly rejected and a proper response code returned.
+    assertThat(resp.join()).isEqualTo(201);
+
+    client.deleteDataset(namespace, name);
+
+    List<Dataset> datasets = client.listDatasets(namespace);
+    assertThat(datasets).hasSize(0);
+  }
+
+  @Test
+  public void testApp_showsDeletedDatasetAfterReceivingNewVersion() throws IOException {
+    String namespace = "namespace";
+    String name = "anotherTable";
+    LineageEvent event =
+        new LineageEvent(
+            "COMPLETE",
+            Instant.now().atZone(ZoneId.systemDefault()),
+            new LineageEvent.Run(UUID.randomUUID().toString(), null),
+            new LineageEvent.Job("namespace", "job_name", null),
+            List.of(new LineageEvent.Dataset(namespace, name, LineageTestUtils.newDatasetFacet())),
+            Collections.emptyList(),
+            "the_producer");
+
+    CompletableFuture<Integer> resp =
+        this.sendLineage(Utils.toJson(event))
+            .thenApply(HttpResponse::statusCode)
+            .whenComplete(
+                (val, error) -> {
+                  if (error != null) {
+                    Assertions.fail("Could not complete request");
+                  }
+                });
+
+    // Ensure the event was correctly rejected and a proper response code returned.
+    assertThat(resp.join()).isEqualTo(201);
+
+    client.deleteDataset(namespace, name);
+
+    List<Dataset> datasets = client.listDatasets(namespace);
+    assertThat(datasets).hasSize(0);
+    resp =
+        this.sendLineage(Utils.toJson(event))
+            .thenApply(HttpResponse::statusCode)
+            .whenComplete(
+                (val, error) -> {
+                  if (error != null) {
+                    Assertions.fail("Could not complete request");
+                  }
+                });
+
+    assertThat(resp.join()).isEqualTo(201);
+
+    datasets = client.listDatasets(namespace);
+    assertThat(datasets).hasSize(1);
+  }
+
+  @Test
+  public void testApp_getDatasetContainsColumnLineage() {
+    LineageEvent event =
+        new LineageEvent(
+            "COMPLETE",
+            Instant.now().atZone(ZoneId.systemDefault()),
+            new LineageEvent.Run(UUID.randomUUID().toString(), null),
+            new LineageEvent.Job("namespace", "job_name", null),
+            List.of(getDatasetA()),
+            List.of(getDatasetB()),
+            "the_producer");
+
+    CompletableFuture<Integer> resp =
+        this.sendLineage(Utils.toJson(event))
+            .thenApply(HttpResponse::statusCode)
+            .whenComplete(
+                (val, error) -> {
+                  if (error != null) {
+                    Assertions.fail("Could not complete request");
+                  }
+                });
+    resp.join();
+
+    // verify listDatasets contains column lineage
+    List<ColumnLineage> columnLineage;
+
+    columnLineage =
+        client.listDatasets("namespace").stream()
+            .filter(d -> d.getName().equals("dataset_b"))
+            .findAny()
+            .get()
+            .getColumnLineage();
+    assertThat(columnLineage).hasSize(1);
+    assertThat(columnLineage.get(0).getInputFields()).hasSize(2);
+
+    // verify getDataset returns non-empty column lineage
+    columnLineage = client.getDataset("namespace", "dataset_b").getColumnLineage();
+    assertThat(columnLineage).hasSize(1);
+    assertThat(columnLineage.get(0).getInputFields()).hasSize(2);
   }
 }

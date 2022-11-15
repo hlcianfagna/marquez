@@ -20,11 +20,13 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.URL;
 import java.time.Instant;
+import java.time.ZonedDateTime;
 import java.util.List;
 import java.util.Properties;
 import java.util.Set;
 import javax.annotation.Nullable;
 import javax.net.ssl.SSLContext;
+import lombok.AllArgsConstructor;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -38,8 +40,10 @@ import marquez.client.models.DatasetVersion;
 import marquez.client.models.Job;
 import marquez.client.models.JobMeta;
 import marquez.client.models.JobVersion;
+import marquez.client.models.LineageEvent;
 import marquez.client.models.Namespace;
 import marquez.client.models.NamespaceMeta;
+import marquez.client.models.Node;
 import marquez.client.models.Run;
 import marquez.client.models.RunMeta;
 import marquez.client.models.RunState;
@@ -54,6 +58,7 @@ import marquez.client.models.Tag;
 public class MarquezClient {
 
   static final URL DEFAULT_BASE_URL = Utils.toUrl("http://localhost:8080");
+  static final int DEFAULT_LINEAGE_GRAPH_DEPTH = 20;
 
   @VisibleForTesting static final int DEFAULT_LIMIT = 100;
   @VisibleForTesting static final int DEFAULT_OFFSET = 0;
@@ -85,6 +90,76 @@ public class MarquezClient {
   MarquezClient(@NonNull final MarquezUrl url, @NonNull final MarquezHttp http) {
     this.url = url;
     this.http = http;
+  }
+
+  public List<LineageEvent> listLineageEvents() {
+    return listLineageEvents(SortDirection.DESC, DEFAULT_LIMIT);
+  }
+
+  public List<LineageEvent> listLineageEvents(MarquezClient.SortDirection sort, int limit) {
+    final String bodyAsJson = http.get(url.toEventUrl(sort, limit));
+    return Events.fromJson(bodyAsJson).getValue();
+  }
+
+  public List<LineageEvent> listLineageEvents(
+      MarquezClient.SortDirection sort, ZonedDateTime before, ZonedDateTime after, int limit) {
+    final String bodyAsJson = http.get(url.toEventUrl(sort, before, after, limit));
+    return Events.fromJson(bodyAsJson).getValue();
+  }
+
+  @AllArgsConstructor
+  public enum SortDirection {
+    DESC("desc"),
+    ASC("asc");
+
+    @Getter public final String value;
+  }
+
+  public Lineage getColumnLineageByDataset(
+      @NonNull String namespaceName, @NonNull String datasetName) {
+    return getColumnLineageByDataset(
+        namespaceName, datasetName, DEFAULT_LINEAGE_GRAPH_DEPTH, false);
+  }
+
+  public Lineage getColumnLineageByDataset(
+      @NonNull String namespaceName, @NonNull String datasetName, @NonNull String field) {
+    return getColumnLineageByDatasetField(
+        namespaceName, datasetName, field, DEFAULT_LINEAGE_GRAPH_DEPTH, false);
+  }
+
+  public Lineage getColumnLineageByDataset(
+      @NonNull String namespaceName,
+      @NonNull String datasetName,
+      int depth,
+      boolean withDownstream) {
+    final String bodyAsJson =
+        http.get(
+            url.toColumnLineageUrlByDataset(namespaceName, datasetName, depth, withDownstream));
+    return Lineage.fromJson(bodyAsJson);
+  }
+
+  public Lineage getColumnLineageByDatasetField(
+      @NonNull String namespaceName,
+      @NonNull String datasetName,
+      @NonNull String field,
+      int depth,
+      boolean withDownstream) {
+    final String bodyAsJson =
+        http.get(
+            url.toColumnLineageUrlByDatasetField(
+                namespaceName, datasetName, field, depth, withDownstream));
+    return Lineage.fromJson(bodyAsJson);
+  }
+
+  public Lineage getColumnLineageByJob(@NonNull String namespaceName, @NonNull String jobName) {
+    return getColumnLineageByJob(namespaceName, jobName, DEFAULT_LINEAGE_GRAPH_DEPTH, false);
+  }
+
+  public Lineage getColumnLineageByJob(
+      @NonNull String namespaceName, @NonNull String jobName, int depth, boolean withDownstream) {
+    final String bodyAsJson =
+        http.get(url.toColumnLineageUrlByJob(namespaceName, jobName, depth, withDownstream));
+    return Lineage.fromJson(bodyAsJson);
   }
 
   public Namespace createNamespace(
@@ -150,6 +225,11 @@ public class MarquezClient {
     return Dataset.fromJson(bodyAsJson);
   }
 
+  public Dataset deleteDataset(@NonNull String namespaceName, @NonNull String datasetName) {
+    final String bodyAsJson = http.delete(url.toDatasetUrl(namespaceName, datasetName));
+    return Dataset.fromJson(bodyAsJson);
+  }
+
   public DatasetVersion getDatasetVersion(
       @NonNull String namespaceName, @NonNull String datasetName, @NonNull String version) {
     final String bodyAsJson =
@@ -207,6 +287,11 @@ public class MarquezClient {
 
   public Job getJob(@NonNull String namespaceName, @NonNull String jobName) {
     final String bodyAsJson = http.get(url.toJobUrl(namespaceName, jobName));
+    return Job.fromJson(bodyAsJson);
+  }
+
+  public Job deleteJob(@NonNull String namespaceName, @NonNull String jobName) {
+    final String bodyAsJson = http.delete(url.toJobUrl(namespaceName, jobName));
     return Job.fromJson(bodyAsJson);
   }
 
@@ -529,6 +614,21 @@ public class MarquezClient {
   }
 
   @Value
+  @EqualsAndHashCode(callSuper = false)
+  public static class Events extends ResultsPage {
+    @Getter List<LineageEvent> value;
+
+    @JsonCreator
+    Events(@JsonProperty("events") final List<LineageEvent> value) {
+      this.value = ImmutableList.copyOf(value);
+    }
+
+    static Events fromJson(final String json) {
+      return Utils.fromJson(json, new TypeReference<Events>() {});
+    }
+  }
+
+  @Value
   static class DatasetVersions {
     @Getter List<DatasetVersion> value;
 
@@ -604,6 +704,24 @@ public class MarquezClient {
     @Getter
     @JsonProperty("description")
     String value;
+
+    String toJson() {
+      return Utils.toJson(this);
+    }
+  }
+
+  @Value
+  public static class Lineage {
+    @Getter Set<Node> graph;
+
+    @JsonCreator
+    Lineage(@JsonProperty("graph") final Set<Node> value) {
+      this.graph = ImmutableSet.copyOf(value);
+    }
+
+    static Lineage fromJson(final String json) {
+      return Utils.fromJson(json, new TypeReference<Lineage>() {});
+    }
 
     String toJson() {
       return Utils.toJson(this);

@@ -15,6 +15,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.google.common.base.Functions;
 import java.sql.SQLException;
+import java.time.Instant;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
@@ -26,6 +27,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+import marquez.api.JdbiUtils;
 import marquez.common.models.JobType;
 import marquez.db.LineageTestUtils.DatasetConsumerJob;
 import marquez.db.LineageTestUtils.JobLineage;
@@ -53,6 +55,7 @@ import org.postgresql.util.PGobject;
 @ExtendWith(MarquezJdbiExternalPostgresExtension.class)
 public class LineageDaoTest {
 
+  private static DatasetDao datasetDao;
   private static LineageDao lineageDao;
   private static OpenLineageDao openLineageDao;
   private final Dataset dataset =
@@ -70,32 +73,14 @@ public class LineageDaoTest {
   @BeforeAll
   public static void setUpOnce(Jdbi jdbi) {
     LineageDaoTest.jdbi = jdbi;
+    datasetDao = jdbi.onDemand(DatasetDao.class);
     lineageDao = jdbi.onDemand(LineageDao.class);
     openLineageDao = jdbi.onDemand(OpenLineageDao.class);
   }
 
   @AfterEach
   public void tearDown(Jdbi jdbi) {
-    jdbi.inTransaction(
-        handle -> {
-          handle.execute("DELETE FROM lineage_events");
-          handle.execute("DELETE FROM runs_input_mapping");
-          handle.execute("DELETE FROM dataset_versions_field_mapping");
-          handle.execute("DELETE FROM dataset_versions");
-          handle.execute("UPDATE runs SET start_run_state_uuid=NULL, end_run_state_uuid=NULL");
-          handle.execute("DELETE FROM run_states");
-          handle.execute("DELETE FROM runs");
-          handle.execute("DELETE FROM run_args");
-          handle.execute("DELETE FROM job_versions_io_mapping");
-          handle.execute("DELETE FROM job_versions");
-          handle.execute("DELETE FROM jobs");
-          handle.execute("DELETE FROM dataset_fields_tag_mapping");
-          handle.execute("DELETE FROM dataset_fields");
-          handle.execute("DELETE FROM datasets");
-          handle.execute("DELETE FROM sources");
-          handle.execute("DELETE FROM namespaces");
-          return null;
-        });
+    JdbiUtils.cleanDatabase(jdbi);
   }
 
   @Test
@@ -218,7 +203,7 @@ public class LineageDaoTest {
             .upsertJob(
                 UUID.randomUUID(),
                 JobType.valueOf(writeJob.getJob().getType()),
-                writeJob.getJob().getCreatedAt(),
+                Instant.now(),
                 namespaceRow.getUuid(),
                 writeJob.getJob().getNamespaceName(),
                 symlinkTargetJobName,
@@ -231,7 +216,7 @@ public class LineageDaoTest {
         .upsertJob(
             writeJob.getJob().getUuid(),
             JobType.valueOf(writeJob.getJob().getType()),
-            writeJob.getJob().getCreatedAt(),
+            Instant.now(),
             namespaceRow.getUuid(),
             writeJob.getJob().getNamespaceName(),
             writeJob.getJob().getName(),
@@ -704,6 +689,61 @@ public class LineageDaoTest {
   }
 
   @Test
+  public void testGetDatasetDataDoesNotReturnDeletedDataset() {
+    Dataset dataset =
+        new Dataset(
+            NAMESPACE,
+            DATASET,
+            LineageEvent.DatasetFacets.builder()
+                .lifecycleStateChange(
+                    new LineageEvent.LifecycleStateChangeFacet(PRODUCER_URL, SCHEMA_URL, "CREATE"))
+                .build());
+
+    String deleteName = DATASET + "-delete";
+    Dataset toDelete =
+        new Dataset(
+            NAMESPACE,
+            deleteName,
+            LineageEvent.DatasetFacets.builder()
+                .lifecycleStateChange(
+                    new LineageEvent.LifecycleStateChangeFacet(PRODUCER_URL, SCHEMA_URL, "CREATE"))
+                .build());
+
+    UpdateLineageRow row =
+        LineageTestUtils.createLineageRow(
+            openLineageDao,
+            "writeJob",
+            "COMPLETE",
+            jobFacet,
+            Arrays.asList(),
+            Arrays.asList(dataset, toDelete));
+
+    Set<DatasetData> datasetData =
+        lineageDao.getDatasetData(
+            Set.of(
+                row.getOutputs().get().get(0).getDatasetRow().getUuid(),
+                row.getOutputs().get().get(1).getDatasetRow().getUuid()));
+
+    assertThat(datasetData)
+        .hasSize(2)
+        .extracting(ds -> ds.getName().getValue())
+        .anyMatch(str -> str.contains(deleteName));
+
+    datasetDao.delete(NAMESPACE, deleteName);
+
+    datasetData =
+        lineageDao.getDatasetData(
+            Set.of(
+                row.getOutputs().get().get(0).getDatasetRow().getUuid(),
+                row.getOutputs().get().get(1).getDatasetRow().getUuid()));
+
+    assertThat(datasetData)
+        .hasSize(1)
+        .extracting(ds -> ds.getName().getValue())
+        .allMatch(str -> str.contains(DATASET));
+  }
+
+  @Test
   public void testGetCurrentRuns() {
 
     UpdateLineageRow writeJob =
@@ -733,7 +773,7 @@ public class LineageDaoTest {
                 Stream.of(writeJob.getJob().getUuid()), newRows.stream().map(JobLineage::getId))
             .collect(Collectors.toSet());
 
-    List<Run> currentRuns = lineageDao.getCurrentRuns(jobids);
+    List<Run> currentRuns = lineageDao.getCurrentRunsWithFacets(jobids);
 
     // assert the job does exist
     assertThat(currentRuns)
@@ -750,13 +790,63 @@ public class LineageDaoTest {
 
     Set<UUID> jobids = Collections.singleton(writeJob.getJob().getUuid());
 
-    List<Run> currentRuns = lineageDao.getCurrentRuns(jobids);
+    List<Run> currentRuns = lineageDao.getCurrentRunsWithFacets(jobids);
 
     // assert the job does exist
     assertThat(currentRuns)
         .hasSize(1)
         .extracting(r -> r.getId().getValue())
         .contains(writeJob.getRun().getUuid());
+  }
+
+  @Test
+  public void testGetCurrentRunsWithFacetsGetsLatestRun() {
+    for (int i = 0; i < 5; i++) {
+      LineageTestUtils.createLineageRow(
+          openLineageDao,
+          "writeJob",
+          "COMPLETE",
+          jobFacet,
+          Arrays.asList(),
+          Arrays.asList(dataset));
+    }
+
+    List<JobLineage> newRows =
+        writeDownstreamLineage(
+            openLineageDao,
+            new LinkedList<>(
+                Arrays.asList(
+                    new DatasetConsumerJob("readJob", 3, Optional.of("outputData2")),
+                    new DatasetConsumerJob("downstreamJob", 1, Optional.empty()))),
+            jobFacet,
+            dataset);
+    UpdateLineageRow writeJob =
+        LineageTestUtils.createLineageRow(
+            openLineageDao, "writeJob", "FAIL", jobFacet, Arrays.asList(), Arrays.asList(dataset));
+
+    Set<UUID> expectedRunIds =
+        Stream.concat(
+                Stream.of(writeJob.getRun().getUuid()), newRows.stream().map(JobLineage::getRunId))
+            .collect(Collectors.toSet());
+    Set<UUID> jobids =
+        Stream.concat(
+                Stream.of(writeJob.getJob().getUuid()), newRows.stream().map(JobLineage::getId))
+            .collect(Collectors.toSet());
+
+    List<Run> currentRuns = lineageDao.getCurrentRunsWithFacets(jobids);
+
+    // assert the job does exist
+    assertThat(currentRuns)
+        .hasSize(expectedRunIds.size())
+        .extracting(r -> r.getId().getValue())
+        .containsAll(expectedRunIds);
+
+    // assert that run_args, input/output versions, and run facets are fetched from the dao.
+    for (Run run : currentRuns) {
+      assertThat(run.getArgs()).hasSize(2);
+      assertThat(run.getOutputVersions()).hasSize(1);
+      assertThat(run.getFacets()).hasSize(1);
+    }
   }
 
   @Test

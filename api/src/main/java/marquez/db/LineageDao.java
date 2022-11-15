@@ -73,20 +73,22 @@ public interface LineageDao {
   Set<JobData> getLineage(@BindList Set<UUID> jobIds, int depth);
 
   @SqlQuery(
-      "SELECT ds.*, dv.fields, dv.lifecycle_state\n"
-          + "FROM datasets ds\n"
-          + "LEFT JOIN dataset_versions dv on dv.uuid = ds.current_version_uuid\n"
-          + "WHERE ds.uuid IN (<dsUuids>);")
+      """
+      SELECT ds.*, dv.fields, dv.lifecycle_state
+      FROM datasets_view ds
+      LEFT JOIN dataset_versions dv on dv.uuid = ds.current_version_uuid
+      WHERE ds.uuid IN (<dsUuids>)""")
   Set<DatasetData> getDatasetData(@BindList Set<UUID> dsUuids);
 
   @SqlQuery(
-      "select j.uuid from jobs j\n"
-          + "inner join job_versions jv on jv.job_uuid = j.uuid\n"
-          + "inner join job_versions_io_mapping io on io.job_version_uuid = jv.uuid\n"
-          + "inner join datasets ds on ds.uuid = io.dataset_uuid\n"
-          + "where ds.name = :datasetName and ds.namespace_name = :namespaceName\n"
-          + "order by io_type DESC, jv.created_at DESC\n"
-          + "limit 1")
+      """
+      SELECT j.uuid FROM jobs j
+      INNER JOIN job_versions jv ON jv.job_uuid = j.uuid
+      INNER JOIN job_versions_io_mapping io ON io.job_version_uuid = jv.uuid
+      INNER JOIN datasets_view ds ON ds.uuid = io.dataset_uuid
+      WHERE ds.name = :datasetName AND ds.namespace_name = :namespaceName
+      ORDER BY io_type DESC, jv.created_at DESC
+      LIMIT 1""")
   Optional<UUID> getJobFromInputOrOutput(String datasetName, String namespaceName);
 
   @SqlQuery(
@@ -127,5 +129,15 @@ public interface LineageDao {
           + "    WHERE run_uuid=r.uuid\n"
           + "    GROUP BY run_uuid\n"
           + ") ro ON ro.run_uuid=r.uuid")
+  List<Run> getCurrentRunsWithFacets(@BindList Collection<UUID> jobUuid);
+
+  @SqlQuery(
+      """
+      SELECT DISTINCT on(r.job_name, r.namespace_name) r.*, jv.version as job_version
+      FROM runs_view r
+      INNER JOIN job_versions jv ON jv.uuid=r.job_version_uuid
+      INNER JOIN jobs_view j ON j.uuid=jv.job_uuid
+      WHERE j.uuid in (<jobUuid>) OR j.symlink_target_uuid IN (<jobUuid>)
+      ORDER BY r.job_name, r.namespace_name, created_at DESC""")
   List<Run> getCurrentRuns(@BindList Collection<UUID> jobUuid);
 }

@@ -11,7 +11,9 @@ from datetime import timedelta, date
 from marquez_client import MarquezClient
 from marquez_client.constants import (
     DEFAULT_LIMIT,
-    DEFAULT_OFFSET
+    DEFAULT_OFFSET,
+    DEFAULT_DEPTH,
+    DEFAULT_WITH_DOWNSTREAM
 )
 from marquez_client.models import (
     DatasetType,
@@ -30,6 +32,7 @@ DESCRIPTION = 'test description'
 TAG_NAME = 'test'
 TAGS = [TAG_NAME]
 VERSION = str(uuid.uuid4())
+PRODUCER = 'marquez-client'
 
 # NAMESPACE
 NAMESPACE_NAME = 'test-namespace'
@@ -221,6 +224,52 @@ TAG_LIST = {
     'tags': [{TAG_NAME: DESCRIPTION}, {TAG_NAME2: TAG_DESCRIPTION2}]
 }
 
+EVENT = {
+    'eventType': "START",
+    'eventTime': NOW_AS_ISO,
+    'run': {
+        'runId': RUN_ID
+    },
+    'job': {
+        'name': JOB_NAME,
+        'namespace': NAMESPACE_NAME
+    },
+    'inputs': [],
+    'outputs': [],
+    'producer': PRODUCER
+}
+
+COLUMN_LINEAGE = [
+    {
+        'id': 'datasetField:namespace:commonDataset:columnA',
+        'type': 'DATASET_FIELD',
+        'data': {
+            'type': 'DATASET_FIELD',
+            'namespace': 'namespace',
+            'dataset': 'otherDataset',
+            'field': 'columnA',
+            'fieldType': 'integer',
+            'transformationDescription': 'identical',
+            'transformationType': 'IDENTITY',
+            'inputFields': [
+                {'namespace': 'namespace', 'dataset':  'otherDataset', 'field': 'columnB'}
+            ]
+        },
+        'inEdges': [
+            {
+                'origin': 'datasetField:namespace:otherDataset:columnB',
+                'destination': 'datasetField:namespace:commonDataset:columnA'
+            }
+        ],
+        'outEdges': [
+            {
+                'origin': 'datasetField:namespace:commonDataset:columnA',
+                'destination': 'datasetField:namespace:otherDataset:columnC'
+            }
+        ]
+    }
+]
+
 
 @pytest.fixture
 def client():
@@ -286,6 +335,25 @@ def test_list_namespaces(mock_get, client):
 
     mock_get.assert_called_once_with(
         url=client._url('/namespaces'),
+        params={
+            'limit': DEFAULT_LIMIT,
+            'offset': DEFAULT_OFFSET
+        },
+        headers=mock.ANY,
+        timeout=mock.ANY
+    )
+
+
+@mock.patch('requests.get')
+def test_list_events(mock_get, client):
+    mock_get.return_value.status_code.return_value = HTTPStatus.OK
+    mock_get.return_value.json.return_value = [EVENT]
+
+    events = client.list_events(NAMESPACE_NAME)
+
+    assert len(events) == 1
+    mock_get.assert_called_once_with(
+        url=client._url('/events/' + NAMESPACE_NAME),
         params={
             'limit': DEFAULT_LIMIT,
             'offset': DEFAULT_OFFSET
@@ -900,6 +968,91 @@ def test_list_tags(mock_get, client):
         params={
             'limit': DEFAULT_LIMIT,
             'offset': DEFAULT_OFFSET
+        },
+        timeout=mock.ANY
+    )
+
+
+@mock.patch('requests.get')
+def test_get_column_lineage_by_dataset(mock_get, client):
+    mock_get.return_value.status_code.return_value = HTTPStatus.OK
+    mock_get.return_value.json.return_value = COLUMN_LINEAGE
+
+    column_lineage = client.get_column_lineage_by_dataset(
+        "namespace_a",
+        "dataset_a",
+        DEFAULT_DEPTH,
+        DEFAULT_WITH_DOWNSTREAM
+    )
+
+    assert column_lineage == COLUMN_LINEAGE
+
+    mock_get.assert_called_once_with(
+        url=client._url(
+            '/column-lineage'
+        ),
+        headers=mock.ANY,
+        params={
+            'nodeId': 'dataset:namespace_a:dataset_a',
+            'depth': DEFAULT_DEPTH,
+            'withDownstream': DEFAULT_WITH_DOWNSTREAM
+        },
+        timeout=mock.ANY
+    )
+
+
+@mock.patch('requests.get')
+def test_get_column_lineage_by_dataset_field(mock_get, client):
+    mock_get.return_value.status_code.return_value = HTTPStatus.OK
+    mock_get.return_value.json.return_value = COLUMN_LINEAGE
+
+    column_lineage = client.get_column_lineage_by_dataset_field(
+        "namespace_a",
+        "dataset_a",
+        "field_a",
+        DEFAULT_DEPTH,
+        DEFAULT_WITH_DOWNSTREAM
+    )
+
+    assert column_lineage == COLUMN_LINEAGE
+
+    mock_get.assert_called_once_with(
+        url=client._url(
+            '/column-lineage'
+        ),
+        headers=mock.ANY,
+        params={
+            'nodeId': 'datasetField:namespace_a:dataset_a:field_a',
+            'depth': DEFAULT_DEPTH,
+            'withDownstream': DEFAULT_WITH_DOWNSTREAM
+        },
+        timeout=mock.ANY
+    )
+
+
+@mock.patch('requests.get')
+def test_get_column_lineage_by_job(mock_get, client):
+    mock_get.return_value.status_code.return_value = HTTPStatus.OK
+    mock_get.return_value.json.return_value = COLUMN_LINEAGE
+
+    column_lineage = client.get_column_lineage_by_job(
+        "namespace_a",
+        "job_a",
+        DEFAULT_DEPTH,
+        DEFAULT_WITH_DOWNSTREAM
+    )
+
+    assert column_lineage == COLUMN_LINEAGE
+
+    mock_get.assert_called_once_with(
+        url=client._url(
+            '/column-lineage'
+        ),
+        headers=mock.ANY,
+        params={
+            'nodeId': 'job:namespace_a:job_a',
+            'depth': DEFAULT_DEPTH,
+            'withDownstream': DEFAULT_WITH_DOWNSTREAM
         },
         timeout=mock.ANY
     )

@@ -16,7 +16,7 @@ import java.util.stream.Stream;
 import javax.annotation.Nullable;
 import lombok.NonNull;
 import marquez.client.models.RunState;
-import org.apache.maven.shared.utils.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 
 class MarquezPathV1 {
   @VisibleForTesting static final String BASE_PATH = "/api/v1";
@@ -70,6 +70,10 @@ class MarquezPathV1 {
 
   static String namespacePath(String namespaceName) {
     return path("/namespaces/%s", namespaceName);
+  }
+
+  static String lineageEventPath() {
+    return path("/events/lineage");
   }
 
   static String sourcePath(String sourceName) {
@@ -172,5 +176,9 @@ class MarquezPathV1 {
 
   static String searchPath() {
     return path("/search");
+  }
+
+  static String columnLineagePath() {
+    return path("/column-lineage/");
   }
 }

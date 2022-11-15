@@ -47,6 +47,8 @@ import java.net.URL;
 import java.security.KeyManagementException;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -60,25 +62,33 @@ import lombok.NonNull;
 import lombok.Value;
 import marquez.client.MarquezClient.DatasetVersions;
 import marquez.client.MarquezClient.Datasets;
+import marquez.client.MarquezClient.Events;
 import marquez.client.MarquezClient.Jobs;
 import marquez.client.MarquezClient.Namespaces;
 import marquez.client.MarquezClient.Runs;
 import marquez.client.MarquezClient.Sources;
 import marquez.client.MarquezClient.Tags;
+import marquez.client.models.ColumnLineageNodeData;
 import marquez.client.models.Dataset;
+import marquez.client.models.DatasetFieldId;
 import marquez.client.models.DatasetId;
 import marquez.client.models.DatasetVersion;
 import marquez.client.models.DbTable;
 import marquez.client.models.DbTableMeta;
 import marquez.client.models.DbTableVersion;
+import marquez.client.models.Edge;
 import marquez.client.models.Field;
 import marquez.client.models.Job;
 import marquez.client.models.JobId;
 import marquez.client.models.JobMeta;
 import marquez.client.models.JobType;
 import marquez.client.models.JsonGenerator;
+import marquez.client.models.LineageEvent;
 import marquez.client.models.Namespace;
 import marquez.client.models.NamespaceMeta;
+import marquez.client.models.Node;
+import marquez.client.models.NodeId;
+import marquez.client.models.NodeType;
 import marquez.client.models.Run;
 import marquez.client.models.RunMeta;
 import marquez.client.models.RunState;
@@ -128,6 +138,7 @@ public class MarquezClientTest {
   private static final List<Field> FIELDS = newFields(4);
   private static final Set<String> TAGS = newTagNames(4);
   private static final Map<String, Object> DB_FACETS = newDatasetFacets(4);
+  private static final String FIELD_NAME = "test_field";
 
   private static final DbTable DB_TABLE =
       new DbTable(
@@ -142,6 +153,7 @@ public class MarquezClientTest {
           TAGS,
           null,
           DB_TABLE_DESCRIPTION,
+          null,
           DB_FACETS,
           CURRENT_VERSION);
   private static final DbTable DB_TABLE_MODIFIED =
@@ -157,8 +169,21 @@ public class MarquezClientTest {
           TAGS,
           LAST_MODIFIED_AT,
           DB_TABLE_DESCRIPTION,
+          null,
           DB_FACETS,
           CURRENT_VERSION);
+
+  // RAW LINEAGE EVENT
+
+  private static final LineageEvent RAW_LINEAGE_EVENT =
+      new LineageEvent(
+          "START",
+          ZonedDateTime.now(ZoneId.of("UTC")),
+          Collections.emptyMap(),
+          Collections.emptyMap(),
+          Collections.emptyList(),
+          Collections.emptyList(),
+          URI.create("http://localhost:8080"));
 
   // STREAM DATASET
   private static final DatasetId STREAM_ID = newDatasetIdWith(NAMESPACE_NAME);
@@ -181,6 +206,7 @@ public class MarquezClientTest {
           null,
           STREAM_SCHEMA_LOCATION,
           STREAM_DESCRIPTION,
+          null,
           DB_FACETS,
           CURRENT_VERSION);
   private static final Stream STREAM_MODIFIED =
@@ -197,6 +223,7 @@ public class MarquezClientTest {
           LAST_MODIFIED_AT,
           STREAM_SCHEMA_LOCATION,
           STREAM_DESCRIPTION,
+          null,
           DB_FACETS,
           CURRENT_VERSION);
 
@@ -361,6 +388,8 @@ public class MarquezClientTest {
           STREAM_DESCRIPTION,
           CREATED_BY_RUN,
           DB_FACETS);
+  private static final DatasetFieldId DATASET_FIELD_ID =
+      new DatasetFieldId(NAMESPACE_NAME, DB_TABLE_NAME, FIELD_NAME);
 
   private final MarquezUrl marquezUrl = MarquezUrl.create(DEFAULT_BASE_URL);
   @Mock private MarquezHttp http;
@@ -679,6 +708,45 @@ public class MarquezClientTest {
   }
 
   @Test
+  public void testListEvents() throws Exception {
+    Events events = new Events(Collections.singletonList(RAW_LINEAGE_EVENT));
+    when(http.get(buildUrlFor("/events/lineage?sortDirection=desc&limit=100")))
+        .thenReturn(
+            Utils.toJson(new ResultsPage<>("events", events.getValue(), events.getValue().size())));
+    final List<LineageEvent> listEvents = client.listLineageEvents();
+    assertThat(listEvents).asList().containsExactly(RAW_LINEAGE_EVENT);
+  }
+
+  @Test
+  public void testListEventsWithSortDirection() throws Exception {
+    Events events = new Events(Collections.singletonList(RAW_LINEAGE_EVENT));
+    when(http.get(buildUrlFor("/events/lineage?sortDirection=desc&limit=10")))
+        .thenReturn(
+            Utils.toJson(new ResultsPage<>("events", events.getValue(), events.getValue().size())));
+    final List<LineageEvent> listEvents =
+        client.listLineageEvents(MarquezClient.SortDirection.DESC, 10);
+    assertThat(listEvents).asList().containsExactly(RAW_LINEAGE_EVENT);
+  }
+
+  @Test
+  public void testListEventsWithSortDirectionBeforeAfter() throws Exception {
+    Events events = new Events(Collections.singletonList(RAW_LINEAGE_EVENT));
+    when(http.get(
+            URI.create(
+                    "http://localhost:8080/api/v1/events/lineage?sortDirection=desc&before=2020-01-01T00%3A00Z&limit=10&after=2022-01-01T00%3A00%2B01%3A00")
+                .toURL()))
+        .thenReturn(
+            Utils.toJson(new ResultsPage<>("events", events.getValue(), events.getValue().size())));
+    final List<LineageEvent> listEvents =
+        client.listLineageEvents(
+            MarquezClient.SortDirection.DESC,
+            ZonedDateTime.of(2020, 1, 1, 0, 0, 0, 0, ZoneId.of("UTC")),
+            ZonedDateTime.of(2022, 1, 1, 0, 0, 0, 0, ZoneId.of("Europe/Warsaw")),
+            10);
+    assertThat(listEvents).asList().containsExactly(RAW_LINEAGE_EVENT);
+  }
+
+  @Test
   public void testCreateJob() throws Exception {
     final URL url = buildUrlFor("/namespaces/%s/jobs/%s", NAMESPACE_NAME, JOB_NAME);
 
@@ -881,6 +949,119 @@ public class MarquezClientTest {
 
     assertThat(createdTag.getName()).isEqualTo("tag2");
     assertThat(createdTag.getDescription()).isNotEmpty().contains("description");
+  }
+
+  @Test
+  public void testGetColumnLineage() throws Exception {
+    Node node =
+        new Node(
+            NodeId.of(DATASET_FIELD_ID),
+            NodeType.DATASET_FIELD,
+            new ColumnLineageNodeData(
+                NAMESPACE_NAME,
+                DB_TABLE_NAME,
+                FIELD_NAME,
+                "String",
+                "transformationDescription",
+                "transformationType",
+                Collections.singletonList(
+                    new DatasetFieldId("namespace", "inDataset", "some-col1"))),
+            ImmutableSet.of(
+                Edge.of(
+                    NodeId.of(DATASET_FIELD_ID),
+                    NodeId.of(new DatasetFieldId("namespace", "inDataset", "some-col1")))),
+            ImmutableSet.of(
+                Edge.of(
+                    NodeId.of(new DatasetFieldId("namespace", "outDataset", "some-col2")),
+                    NodeId.of(DATASET_FIELD_ID))));
+    MarquezClient.Lineage lineage = new MarquezClient.Lineage(ImmutableSet.of(node));
+    String lineageJson = lineage.toJson();
+    when(http.get(
+            buildUrlFor(
+                "/column-lineage?nodeId=dataset%3Anamespace%3Adataset&depth=20&withDownstream=false")))
+        .thenReturn(lineageJson);
+
+    Node retrievedNode =
+        client.getColumnLineageByDataset("namespace", "dataset").getGraph().stream()
+            .findAny()
+            .get();
+    assertThat(retrievedNode).isEqualTo(node);
+  }
+
+  @Test
+  public void testGetColumnLineageByField() throws Exception {
+    Node node =
+        new Node(
+            NodeId.of(DATASET_FIELD_ID),
+            NodeType.DATASET_FIELD,
+            new ColumnLineageNodeData(
+                NAMESPACE_NAME,
+                DB_TABLE_NAME,
+                FIELD_NAME,
+                "String",
+                "transformationDescription",
+                "transformationType",
+                Collections.singletonList(
+                    new DatasetFieldId("namespace", "inDataset", "some-col1"))),
+            ImmutableSet.of(
+                Edge.of(
+                    NodeId.of(DATASET_FIELD_ID),
+                    NodeId.of(new DatasetFieldId("namespace", "inDataset", "some-col1")))),
+            ImmutableSet.of(
+                Edge.of(
+                    NodeId.of(new DatasetFieldId("namespace", "outDataset", "some-col2")),
+                    NodeId.of(DATASET_FIELD_ID))));
+    MarquezClient.Lineage lineage = new MarquezClient.Lineage(ImmutableSet.of(node));
+    String lineageJson = lineage.toJson();
+    when(http.get(
+            buildUrlFor(
+                "/column-lineage?nodeId=datasetField%3Anamespace%3Adataset%3Asome-col1&depth=20&withDownstream=false")))
+        .thenReturn(lineageJson);
+
+    Node retrievedNode =
+        client.getColumnLineageByDataset("namespace", "dataset", "some-col1").getGraph().stream()
+            .findAny()
+            .get();
+    assertThat(retrievedNode).isEqualTo(node);
+  }
+
+  @Test
+  public void testGetColumnLineageByJob() throws Exception {
+    Node node =
+        new Node(
+            NodeId.of(DATASET_FIELD_ID),
+            NodeType.DATASET_FIELD,
+            new ColumnLineageNodeData(
+                NAMESPACE_NAME,
+                DB_TABLE_NAME,
+                FIELD_NAME,
+                "String",
+                "transformationDescription",
+                "transformationType",
+                Collections.singletonList(
+                    new DatasetFieldId("namespace", "inDataset", "some-col1"))),
+            ImmutableSet.of(
+                Edge.of(
+                    NodeId.of(DATASET_FIELD_ID),
+                    NodeId.of(new DatasetFieldId("namespace", "inDataset", "some-col1")))),
+            ImmutableSet.of(
+                Edge.of(
+                    NodeId.of(new DatasetFieldId("namespace", "outDataset", "some-col2")),
+                    NodeId.of(DATASET_FIELD_ID))));
+    MarquezClient.Lineage lineage = new MarquezClient.Lineage(ImmutableSet.of(node));
+    String lineageJson = lineage.toJson();
+    when(http.get(
+            buildUrlFor(
+                "/column-lineage?nodeId=job%3Anamespace%3Ajob&depth=20&withDownstream=false")))
+        .thenReturn(lineageJson);
+
+    Node retrievedNode =
+        client.getColumnLineageByJob("namespace", "job").getGraph().stream().findAny().get();
+    assertThat(retrievedNode).isEqualTo(node);
+  }
+
+  private URL buildUrlFor(String pathTemplate) throws Exception {
+    return new URL(DEFAULT_BASE_URL + BASE_PATH + pathTemplate);
   }
 
   private URL buildUrlFor(String pathTemplate, String... pathArgs) throws Exception {

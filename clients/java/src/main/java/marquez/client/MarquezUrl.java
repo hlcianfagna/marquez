@@ -7,6 +7,7 @@ package marquez.client;
 
 import static com.google.common.base.Preconditions.checkArgument;
 import static java.time.format.DateTimeFormatter.ISO_INSTANT;
+import static marquez.client.MarquezPathV1.columnLineagePath;
 import static marquez.client.MarquezPathV1.createRunPath;
 import static marquez.client.MarquezPathV1.createTagPath;
 import static marquez.client.MarquezPathV1.datasetPath;
@@ -36,9 +37,15 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URL;
 import java.time.Instant;
+import java.time.ZonedDateTime;
+import java.util.HashMap;
 import java.util.Map;
 import javax.annotation.Nullable;
 import lombok.NonNull;
+import marquez.client.models.DatasetFieldId;
+import marquez.client.models.DatasetId;
+import marquez.client.models.JobId;
+import marquez.client.models.NodeId;
 import marquez.client.models.RunState;
 import marquez.client.models.SearchFilter;
 import marquez.client.models.SearchSort;
@@ -87,6 +94,30 @@ class MarquezUrl {
 
   URL toNamespaceUrl(String namespaceName) {
     return from(namespacePath(namespaceName));
+  }
+
+  URL toEventUrl(MarquezClient.SortDirection sort, int limit) {
+    return toEventUrl(sort, null, null, limit);
+  }
+
+  URL toEventUrl(
+      @Nullable MarquezClient.SortDirection sort,
+      @Nullable ZonedDateTime before,
+      @Nullable ZonedDateTime after,
+      int limit) {
+    Map<String, Object> queryParams = new HashMap<>();
+
+    if (sort != null) {
+      queryParams.put("sortDirection", sort.getValue());
+    }
+    if (before != null) {
+      queryParams.put("before", before.toOffsetDateTime().toString());
+    }
+    if (after != null) {
+      queryParams.put("after", after.toOffsetDateTime().toString());
+    }
+    queryParams.put("limit", limit);
+    return from(MarquezPathV1.lineageEventPath(), queryParams);
   }
 
   URL toSourceUrl(String sourceName) {
@@ -178,5 +209,31 @@ class MarquezUrl {
     }
     queryParams.put("limit", limit);
     return from(searchPath(), queryParams.build());
+  }
+
+  URL toColumnLineageUrlByDatasetField(
+      String namespace, String dataset, String field, int depth, boolean withDownstream) {
+    final ImmutableMap.Builder queryParams = new ImmutableMap.Builder();
+    queryParams.put("nodeId", NodeId.of(new DatasetFieldId(namespace, dataset, field)).getValue());
+    queryParams.put("depth", String.valueOf(depth));
+    queryParams.put("withDownstream", String.valueOf(withDownstream));
+    return from(columnLineagePath(), queryParams.build());
+  }
+
+  URL toColumnLineageUrlByDataset(
+      String namespace, String dataset, int depth, boolean withDownstream) {
+    final ImmutableMap.Builder queryParams = new ImmutableMap.Builder();
+    queryParams.put("nodeId", NodeId.of(new DatasetId(namespace, dataset)).getValue());
+    queryParams.put("depth", String.valueOf(depth));
+    queryParams.put("withDownstream", String.valueOf(withDownstream));
+    return from(columnLineagePath(), queryParams.build());
+  }
+
+  URL toColumnLineageUrlByJob(String namespace, String job, int depth, boolean withDownstream) {
+    final ImmutableMap.Builder queryParams = new ImmutableMap.Builder();
+    queryParams.put("nodeId", NodeId.of(new JobId(namespace, job)).getValue());
+    queryParams.put("depth", String.valueOf(depth));
+    queryParams.put("withDownstream", String.valueOf(withDownstream));
+    return from(columnLineagePath(), queryParams.build());
   }
 }

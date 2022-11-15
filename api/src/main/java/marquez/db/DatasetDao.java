@@ -23,6 +23,7 @@ import marquez.common.models.TagName;
 import marquez.db.mappers.DatasetMapper;
 import marquez.db.mappers.DatasetRowMapper;
 import marquez.db.models.DatasetRow;
+import marquez.db.models.DatasetSymlinkRow;
 import marquez.db.models.DatasetVersionRow;
 import marquez.db.models.NamespaceRow;
 import marquez.db.models.SourceRow;
@@ -43,7 +44,7 @@ import org.jdbi.v3.sqlobject.transaction.Transaction;
 public interface DatasetDao extends BaseDao {
   @SqlQuery(
       "SELECT EXISTS ("
-          + "SELECT 1 FROM datasets AS d "
+          + "SELECT 1 FROM datasets_view AS d "
           + "WHERE d.name = :datasetName AND d.namespace_name = :namespaceName)")
   boolean exists(String namespaceName, String datasetName);
 
@@ -69,49 +70,49 @@ public interface DatasetDao extends BaseDao {
   void updateVersion(UUID rowUuid, Instant updatedAt, UUID currentVersionUuid);
 
   @SqlQuery(
-      "WITH selected_datasets AS (\n"
-          + "    SELECT d.*\n"
-          + "    FROM datasets d\n"
-          + "    WHERE d.namespace_name = :namespaceName\n"
-          + "    AND d.name = :datasetName\n"
-          + "), dataset_runs AS (\n"
-          + "    SELECT d.uuid, d.name, d.namespace_name, dv.run_uuid, dv.lifecycle_state, event_time, event\n"
-          + "    FROM selected_datasets d\n"
-          + "    INNER JOIN dataset_versions dv ON dv.uuid = d.current_version_uuid\n"
-          + "    LEFT JOIN LATERAL (\n"
-          + "        SELECT run_uuid, event_time, event FROM lineage_events\n"
-          + "        WHERE run_uuid = dv.run_uuid\n"
-          + "    ) e ON e.run_uuid = dv.run_uuid\n"
-          + "    UNION\n"
-          + "    SELECT d.uuid, d.name, d.namespace_name, rim.run_uuid, lifecycle_state, event_time, event\n"
-          + "    FROM selected_datasets d\n"
-          + "    INNER JOIN dataset_versions dv ON dv.uuid = d.current_version_uuid\n"
-          + "    LEFT JOIN runs_input_mapping rim ON dv.uuid = rim.dataset_version_uuid\n"
-          + "    LEFT JOIN LATERAL (\n"
-          + "        SELECT run_uuid, event_time, event FROM lineage_events\n"
-          + "        WHERE run_uuid = rim.run_uuid\n"
-          + "    ) e ON e.run_uuid = rim.run_uuid\n"
-          + ")\n"
-          + "SELECT d.*, dv.fields, dv.lifecycle_state, sv.schema_location, t.tags, facets\n"
-          + "FROM selected_datasets d\n"
-          + "LEFT JOIN dataset_versions dv ON d.current_version_uuid = dv.uuid\n"
-          + "LEFT JOIN stream_versions AS sv ON sv.dataset_version_uuid = dv.uuid\n"
-          + "LEFT JOIN (\n"
-          + "    SELECT ARRAY_AGG(t.name) AS tags, m.dataset_uuid\n"
-          + "    FROM tags AS t\n"
-          + "             INNER JOIN datasets_tag_mapping AS m ON m.tag_uuid = t.uuid\n"
-          + "    GROUP BY m.dataset_uuid\n"
-          + ") t ON t.dataset_uuid = d.uuid\n"
-          + "LEFT JOIN (\n"
-          + "    SELECT d2.uuid AS dataset_uuid, JSONB_AGG(ds->'facets' ORDER BY event_time ASC) AS facets\n"
-          + "    FROM dataset_runs d2,\n"
-          + "         jsonb_array_elements(coalesce(d2.event -> 'inputs', '[]'::jsonb) || coalesce(d2.event -> 'outputs', '[]'::jsonb)) AS ds\n"
-          + "    WHERE d2.run_uuid = d2.run_uuid\n"
-          + "      AND ds -> 'facets' IS NOT NULL\n"
-          + "      AND ds ->> 'name' = d2.name\n"
-          + "      AND ds ->> 'namespace' = d2.namespace_name\n"
-          + "    GROUP BY d2.uuid\n"
-          + ") f ON f.dataset_uuid = d.uuid")
+      """
+      WITH selected_datasets AS (
+          SELECT d.*
+          FROM datasets_view d
+          WHERE CAST((:namespaceName, :datasetName) AS DATASET_NAME) = ANY(d.dataset_symlinks)
+      ), dataset_runs AS (
+          SELECT d.uuid, d.name, d.namespace_name, dv.run_uuid, dv.lifecycle_state, event_time, event
+          FROM selected_datasets d
+          INNER JOIN dataset_versions dv ON dv.uuid = d.current_version_uuid
+          LEFT JOIN LATERAL (
+              SELECT run_uuid, event_time, event FROM lineage_events
+              WHERE run_uuid = dv.run_uuid
+          ) e ON e.run_uuid = dv.run_uuid
+          UNION
+          SELECT d.uuid, d.name, d.namespace_name, rim.run_uuid, lifecycle_state, event_time, event
+          FROM selected_datasets d
+          INNER JOIN dataset_versions dv ON dv.uuid = d.current_version_uuid
+          LEFT JOIN runs_input_mapping rim ON dv.uuid = rim.dataset_version_uuid
+          LEFT JOIN LATERAL (
+              SELECT run_uuid, event_time, event FROM lineage_events
+              WHERE run_uuid = rim.run_uuid
+          ) e ON e.run_uuid = rim.run_uuid
+      )
+      SELECT d.*, dv.fields, dv.lifecycle_state, sv.schema_location, t.tags, facets
+      FROM selected_datasets d
+      LEFT JOIN dataset_versions dv ON d.current_version_uuid = dv.uuid
+      LEFT JOIN stream_versions AS sv ON sv.dataset_version_uuid = dv.uuid
+      LEFT JOIN (
+          SELECT ARRAY_AGG(t.name) AS tags, m.dataset_uuid
+          FROM tags AS t
+                   INNER JOIN datasets_tag_mapping AS m ON m.tag_uuid = t.uuid
+          GROUP BY m.dataset_uuid
+      ) t ON t.dataset_uuid = d.uuid
+      LEFT JOIN (
+          SELECT d2.uuid AS dataset_uuid, JSONB_AGG(ds->'facets' ORDER BY event_time ASC) AS facets
+          FROM dataset_runs d2,
+               jsonb_array_elements(coalesce(d2.event -> 'inputs', '[]'::jsonb) || coalesce(d2.event -> 'outputs', '[]'::jsonb)) AS ds
+          WHERE d2.run_uuid = d2.run_uuid
+            AND ds -> 'facets' IS NOT NULL
+            AND ds ->> 'name' = d2.name
+            AND ds ->> 'namespace' = d2.namespace_name
+          GROUP BY d2.uuid
+      ) f ON f.dataset_uuid = d.uuid""")
   Optional<Dataset> findDatasetByName(String namespaceName, String datasetName);
 
   default Optional<Dataset> findWithTags(String namespaceName, String datasetName) {
@@ -131,64 +132,66 @@ public interface DatasetDao extends BaseDao {
   }
 
   @SqlQuery(
-      "SELECT d.* FROM datasets AS d WHERE d.name = :datasetName AND d.namespace_name = :namespaceName")
+      "SELECT d.* FROM datasets_view AS d WHERE d.name = :datasetName AND d.namespace_name = :namespaceName")
   Optional<DatasetRow> findDatasetAsRow(String namespaceName, String datasetName);
 
-  @SqlQuery("SELECT * FROM datasets WHERE name = :datasetName AND namespace_name = :namespaceName")
+  @SqlQuery(
+      "SELECT * FROM datasets_view WHERE name = :datasetName AND namespace_name = :namespaceName")
   Optional<DatasetRow> getUuid(String namespaceName, String datasetName);
 
   @SqlQuery(
-      "WITH selected_datasets AS (\n"
-          + "    SELECT d.*\n"
-          + "    FROM datasets d\n"
-          + "    WHERE d.namespace_name = :namespaceName\n"
-          + "    ORDER BY d.name\n"
-          + "    LIMIT :limit OFFSET :offset\n"
-          + "), dataset_runs AS (\n"
-          + "    SELECT d.uuid, d.name, d.namespace_name, dv.run_uuid, dv.lifecycle_state, event_time, event\n"
-          + "    FROM selected_datasets d\n"
-          + "    INNER JOIN dataset_versions dv ON dv.uuid = d.current_version_uuid\n"
-          + "    LEFT JOIN LATERAL (\n"
-          + "        SELECT run_uuid, event_time, event FROM lineage_events\n"
-          + "        WHERE run_uuid = dv.run_uuid\n"
-          + "    ) e ON e.run_uuid = dv.run_uuid\n"
-          + "    UNION\n"
-          + "    SELECT d.uuid, d.name, d.namespace_name, rim.run_uuid, lifecycle_state, event_time, event\n"
-          + "    FROM selected_datasets d\n"
-          + "    INNER JOIN dataset_versions dv ON dv.uuid = d.current_version_uuid\n"
-          + "    LEFT JOIN runs_input_mapping rim ON dv.uuid = rim.dataset_version_uuid\n"
-          + "    LEFT JOIN LATERAL (\n"
-          + "        SELECT run_uuid, event_time, event FROM lineage_events\n"
-          + "        WHERE run_uuid = rim.run_uuid\n"
-          + "    ) e ON e.run_uuid = rim.run_uuid\n"
-          + ")\n"
-          + "SELECT d.*, dv.fields, dv.lifecycle_state, sv.schema_location, t.tags, facets\n"
-          + "FROM selected_datasets d\n"
-          + "LEFT JOIN dataset_versions dv ON d.current_version_uuid = dv.uuid\n"
-          + "LEFT JOIN stream_versions AS sv ON sv.dataset_version_uuid = dv.uuid\n"
-          + "LEFT JOIN (\n"
-          + "    SELECT ARRAY_AGG(t.name) AS tags, m.dataset_uuid\n"
-          + "    FROM tags AS t\n"
-          + "    INNER JOIN datasets_tag_mapping AS m ON m.tag_uuid = t.uuid\n"
-          + "    GROUP BY m.dataset_uuid\n"
-          + ") t ON t.dataset_uuid = d.uuid\n"
-          + "LEFT JOIN (\n"
-          + "    SELECT d2.uuid AS dataset_uuid, JSONB_AGG(ds->'facets' ORDER BY event_time) AS facets\n"
-          + "    FROM dataset_runs d2,\n"
-          + "         jsonb_array_elements(coalesce(d2.event -> 'inputs', '[]'::jsonb) || coalesce(d2.event -> 'outputs', '[]'::jsonb)) AS ds\n"
-          + "    WHERE d2.run_uuid = d2.run_uuid\n"
-          + "    AND ds -> 'facets' IS NOT NULL\n"
-          + "    AND ds ->> 'name' = d2.name\n"
-          + "    AND ds ->> 'namespace' = d2.namespace_name\n"
-          + "    GROUP BY d2.uuid\n"
-          + ") f ON f.dataset_uuid = d.uuid\n"
-          + "ORDER BY d.name")
+      """
+      WITH selected_datasets AS (
+          SELECT d.*
+          FROM datasets_view d
+          WHERE d.namespace_name = :namespaceName
+          ORDER BY d.name
+          LIMIT :limit OFFSET :offset
+      ), dataset_runs AS (
+          SELECT d.uuid, d.name, d.namespace_name, dv.run_uuid, dv.lifecycle_state, event_time, event
+          FROM selected_datasets d
+          INNER JOIN dataset_versions dv ON dv.uuid = d.current_version_uuid
+          LEFT JOIN LATERAL (
+              SELECT run_uuid, event_time, event FROM lineage_events
+              WHERE run_uuid = dv.run_uuid
+          ) e ON e.run_uuid = dv.run_uuid
+          UNION
+          SELECT d.uuid, d.name, d.namespace_name, rim.run_uuid, lifecycle_state, event_time, event
+          FROM selected_datasets d
+          INNER JOIN dataset_versions dv ON dv.uuid = d.current_version_uuid
+          LEFT JOIN runs_input_mapping rim ON dv.uuid = rim.dataset_version_uuid
+          LEFT JOIN LATERAL (
+              SELECT run_uuid, event_time, event FROM lineage_events
+              WHERE run_uuid = rim.run_uuid
+          ) e ON e.run_uuid = rim.run_uuid
+      )
+      SELECT d.*, dv.fields, dv.lifecycle_state, sv.schema_location, t.tags, facets
+      FROM selected_datasets d
+      LEFT JOIN dataset_versions dv ON d.current_version_uuid = dv.uuid
+      LEFT JOIN stream_versions AS sv ON sv.dataset_version_uuid = dv.uuid
+      LEFT JOIN (
+          SELECT ARRAY_AGG(t.name) AS tags, m.dataset_uuid
+          FROM tags AS t
+          INNER JOIN datasets_tag_mapping AS m ON m.tag_uuid = t.uuid
+          GROUP BY m.dataset_uuid
+      ) t ON t.dataset_uuid = d.uuid
+      LEFT JOIN (
+          SELECT d2.uuid AS dataset_uuid, JSONB_AGG(ds->'facets' ORDER BY event_time) AS facets
+          FROM dataset_runs d2,
+               jsonb_array_elements(coalesce(d2.event -> 'inputs', '[]'::jsonb) || coalesce(d2.event -> 'outputs', '[]'::jsonb)) AS ds
+          WHERE d2.run_uuid = d2.run_uuid
+          AND ds -> 'facets' IS NOT NULL
+          AND ds ->> 'name' = d2.name
+          AND ds ->> 'namespace' = d2.namespace_name
+          GROUP BY d2.uuid
+      ) f ON f.dataset_uuid = d.uuid
+      ORDER BY d.name""")
   List<Dataset> findAll(String namespaceName, int limit, int offset);
 
-  @SqlQuery("SELECT count(*) FROM datasets")
+  @SqlQuery("SELECT count(*) FROM datasets_view")
   int count();
 
-  @SqlQuery("SELECT count(*) FROM datasets AS j WHERE j.namespace_name = :namespaceName")
+  @SqlQuery("SELECT count(*) FROM datasets_view AS j WHERE j.namespace_name = :namespaceName")
   int countFor(String namespaceName);
 
   default List<Dataset> findAllWithTags(String namespaceName, int limit, int offset) {
@@ -197,40 +200,45 @@ public interface DatasetDao extends BaseDao {
   }
 
   @SqlQuery(
-      "INSERT INTO datasets ("
-          + "uuid, "
-          + "type, "
-          + "created_at, "
-          + "updated_at, "
-          + "namespace_uuid, "
-          + "namespace_name, "
-          + "source_uuid, "
-          + "source_name, "
-          + "name, "
-          + "physical_name, "
-          + "description, "
-          + "is_deleted "
-          + ") VALUES ( "
-          + ":uuid, "
-          + ":type, "
-          + ":now, "
-          + ":now, "
-          + ":namespaceUuid, "
-          + ":namespaceName, "
-          + ":sourceUuid, "
-          + ":sourceName, "
-          + ":name, "
-          + ":physicalName, "
-          + ":description, "
-          + ":isDeleted) "
-          + "ON CONFLICT (namespace_uuid, name) "
-          + "DO UPDATE SET "
-          + "type = EXCLUDED.type, "
-          + "updated_at = EXCLUDED.updated_at, "
-          + "physical_name = EXCLUDED.physical_name, "
-          + "description = EXCLUDED.description, "
-          + "is_deleted = EXCLUDED.is_deleted "
-          + "RETURNING *")
+      """
+      INSERT INTO datasets (
+          uuid,
+          type,
+          created_at,
+          updated_at,
+          namespace_uuid,
+          namespace_name,
+          source_uuid,
+          source_name,
+          name,
+          physical_name,
+          description,
+          is_deleted,
+          is_hidden
+          ) VALUES (
+            :uuid,
+            :type,
+            :now,
+            :now,
+            :namespaceUuid,
+            :namespaceName,
+            :sourceUuid,
+            :sourceName,
+            :name,
+            :physicalName,
+            :description,
+            :isDeleted,
+            false
+          ) ON CONFLICT (uuid)
+          DO UPDATE SET
+          type = EXCLUDED.type,
+          updated_at = EXCLUDED.updated_at,
+          physical_name = EXCLUDED.physical_name,
+          description = EXCLUDED.description,
+          is_deleted = EXCLUDED.is_deleted,
+          is_hidden = EXCLUDED.is_hidden
+          RETURNING *
+    """)
   DatasetRow upsert(
       UUID uuid,
       DatasetType type,
@@ -267,7 +275,7 @@ public interface DatasetDao extends BaseDao {
           + ":sourceName, "
           + ":name, "
           + ":physicalName) "
-          + "ON CONFLICT (namespace_uuid, name) "
+          + "ON CONFLICT (uuid) "
           + "DO UPDATE SET "
           + "type = EXCLUDED.type, "
           + "updated_at = EXCLUDED.updated_at, "
@@ -284,6 +292,18 @@ public interface DatasetDao extends BaseDao {
       String name,
       String physicalName);
 
+  @SqlQuery(
+      """
+  UPDATE datasets
+  SET is_hidden = true
+  FROM dataset_symlinks, namespaces
+  WHERE dataset_symlinks.dataset_uuid = datasets.uuid
+  AND namespaces.uuid = dataset_symlinks.namespace_uuid
+  AND namespaces.name=:namespaceName AND dataset_symlinks.name=:name
+  RETURNING *
+  """)
+  Optional<DatasetRow> delete(String namespaceName, String name);
+
   @Transaction
   default Dataset upsertDatasetMeta(
       NamespaceName namespaceName, DatasetName datasetName, DatasetMeta datasetMeta) {
@@ -292,6 +312,10 @@ public interface DatasetDao extends BaseDao {
         createNamespaceDao()
             .upsertNamespaceRow(
                 UUID.randomUUID(), now, namespaceName.getValue(), DEFAULT_NAMESPACE_OWNER);
+    DatasetSymlinkRow symlinkRow =
+        createDatasetSymlinkDao()
+            .upsertDatasetSymlinkRow(
+                UUID.randomUUID(), datasetName.getValue(), namespaceRow.getUuid(), true, null, now);
     SourceRow sourceRow =
         createSourceDao()
             .upsertOrDefault(
@@ -300,13 +324,12 @@ public interface DatasetDao extends BaseDao {
                 now,
                 datasetMeta.getSourceName().getValue(),
                 "");
-    UUID newDatasetUuid = UUID.randomUUID();
     DatasetRow datasetRow;
 
     if (datasetMeta.getDescription().isPresent()) {
       datasetRow =
           upsert(
-              newDatasetUuid,
+              symlinkRow.getUuid(),
               datasetMeta.getType(),
               now,
               namespaceRow.getUuid(),
@@ -320,7 +343,7 @@ public interface DatasetDao extends BaseDao {
     } else {
       datasetRow =
           upsert(
-              newDatasetUuid,
+              symlinkRow.getUuid(),
               datasetMeta.getType(),
               now,
               namespaceRow.getUuid(),
@@ -331,7 +354,8 @@ public interface DatasetDao extends BaseDao {
               datasetMeta.getPhysicalName().getValue());
     }
 
-    updateDatasetMetric(namespaceName, datasetMeta.getType(), newDatasetUuid, datasetRow.getUuid());
+    updateDatasetMetric(
+        namespaceName, datasetMeta.getType(), symlinkRow.getUuid(), datasetRow.getUuid());
 
     TagDao tagDao = createTagDao();
     List<DatasetTagMapping> datasetTagMappings = new ArrayList<>();

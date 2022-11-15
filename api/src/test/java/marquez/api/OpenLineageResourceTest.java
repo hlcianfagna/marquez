@@ -7,6 +7,7 @@ package marquez.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -16,7 +17,9 @@ import com.google.common.collect.ImmutableSortedSet;
 import io.dropwizard.testing.junit5.DropwizardExtensionsSupport;
 import io.dropwizard.testing.junit5.ResourceExtension;
 import java.util.Map;
+import javax.ws.rs.core.Response;
 import marquez.common.Utils;
+import marquez.db.OpenLineageDao;
 import marquez.service.LineageService;
 import marquez.service.ServiceFactory;
 import marquez.service.models.Lineage;
@@ -32,19 +35,22 @@ class OpenLineageResourceTest {
 
   static {
     LineageService lineageService = mock(LineageService.class);
+    OpenLineageDao openLineageDao = mock(OpenLineageDao.class);
 
     Node testNode =
         Utils.fromJson(
             OpenLineageResourceTest.class.getResourceAsStream("/lineage/node.json"),
             new TypeReference<>() {});
     LINEAGE = new Lineage(ImmutableSortedSet.of(testNode));
-    when(lineageService.lineage(any(NodeId.class), anyInt())).thenReturn(LINEAGE);
+    when(lineageService.lineage(any(NodeId.class), anyInt(), anyBoolean())).thenReturn(LINEAGE);
 
     ServiceFactory serviceFactory =
         ApiTestUtils.mockServiceFactory(Map.of(LineageService.class, lineageService));
 
     UNDER_TEST =
-        ResourceExtension.builder().addResource(new OpenLineageResource(serviceFactory)).build();
+        ResourceExtension.builder()
+            .addResource(new OpenLineageResource(serviceFactory, openLineageDao))
+            .build();
   }
 
   @Test
@@ -58,5 +64,17 @@ class OpenLineageResourceTest {
             .readEntity(Lineage.class);
 
     assertEquals(lineage, LINEAGE);
+  }
+
+  @Test
+  public void testGetLineageEventsBadSort() {
+    final Response response =
+        UNDER_TEST
+            .target("/api/v1/events/lineage")
+            .queryParam("sortDirection", "asdf")
+            .request()
+            .get();
+
+    assertEquals(response.getStatus(), 400);
   }
 }

@@ -80,6 +80,9 @@ public final class Columns {
   public static final String FIELD_UUIDS = "field_uuids";
   public static final String LIFECYCLE_STATE = "lifecycle_state";
 
+  /* DATASET SYMLINK ROW COLUMNS */
+  public static final String IS_PRIMARY = "is_primary";
+
   /* STREAM VERSION ROW COLUMNS */
   public static final String SCHEMA_LOCATION = "schema_location";
 
@@ -106,6 +109,7 @@ public final class Columns {
   public static final String CONTEXT = "context";
 
   /* RUN ROW COLUMNS */
+  public static final String EXTERNAL_ID = "external_id";
   public static final String RUN_ARGS_UUID = "run_args_uuid";
   public static final String INPUT_VERSION_UUIDS = "input_version_uuids";
   public static final String NOMINAL_START_TIME = "nominal_start_time";
@@ -125,6 +129,18 @@ public final class Columns {
   public static final String TRANSITIONED_AT = "transitioned_at";
   public static final String RUN_UUID = "run_uuid";
   public static final String STATE = "state";
+
+  /* COLUMN LEVEL LINEAGE ROW COLUMNS */
+  public static final String FIELD_NAME = "field_name";
+  public static final String OUTPUT_DATASET_VERSION_UUID = "output_dataset_version_uuid";
+  public static final String OUTPUT_DATASET_FIELD_UUID = "output_dataset_field_uuid";
+  public static final String INPUT_DATASET_FIELD_UUID = "input_dataset_field_uuid";
+  public static final String INPUT_DATASET_VERSION_UUID = "input_dataset_version_uuid";
+  public static final String TRANSFORMATION_DESCRIPTION = "transformation_description";
+  public static final String TRANSFORMATION_TYPE = "transformation_type";
+
+  /* LINEAGE EVENT ROW COLUMNS */
+  public static final String EVENT = "event";
 
   public static UUID uuidOrNull(final ResultSet results, final String column) throws SQLException {
     if (results.getObject(column) == null) {

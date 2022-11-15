@@ -3,7 +3,7 @@
 openapi: 3.0.2
 info:
   title: Marquez
-  version: 0.26.0-SNAPSHOT
+  version: 0.28.0-SNAPSHOT
   description: Marquez is an open source **metadata service** for the **collection**, **aggregation**,
     and **visualization** of a data ecosystem's metadata.
   license:
@@ -69,6 +69,26 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/NamespaceList'
+
+  /events/lineage:
+    get:
+      operationId: getLineageEvents
+      parameters:
+        - $ref: '#/components/parameters/sortDirection'
+        - $ref: '#/components/parameters/before'
+        - $ref: '#/components/parameters/after'
+        - $ref: '#/components/parameters/limit'
+      summary: List all received OpenLineage events.
+      description: Returns a list of OpenLineage events, sorted in direction of passed sort parameter. By default it is desc.
+      tags:
+        - Events
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LineageEventList'
 
   /sources/{source}:
     parameters:
@@ -141,7 +161,7 @@ paths:
         content:
           application/json:
             schema:
-              oneOf:
+              anyOf:
                 - $ref: '#/components/schemas/DbTable'
                 - $ref: '#/components/schemas/Stream'
       responses:
@@ -155,6 +175,19 @@ paths:
       operationId: getDataset
       summary: Retrieve a dataset
       description: Returns a dataset.
+      tags:
+        - Datasets
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Dataset'
+    delete:
+      operationId: deleteDataset
+      summary: Soft deletes dataset.
+      description: Soft deletes dataset. It will be un-deleted if new OpenLineage event containing this dataset comes.
       tags:
         - Datasets
       responses:
@@ -292,6 +325,19 @@ paths:
       operationId: getJob
       summary: Retrieve a job
       description: Retrieve a job.
+      tags:
+        - Jobs
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Job'
+    delete:
+      operationId: deleteJob
+      summary: Soft deletes job.
+      description: Soft deletes job. It will be un-deleted if new OpenLineage event containing this job comes.
       tags:
         - Jobs
       responses:
@@ -523,6 +569,24 @@ paths:
               schema:
                 $ref: '#/components/schemas/LineageGraph'
 
+  /column-lineage:
+    get:
+      operationId: getLineage
+      parameters:
+        - $ref: '#/components/parameters/nodeId'
+        - $ref: '#/components/parameters/depth'
+        - $ref: '#/components/parameters/withDownstream'
+      tags:
+        - Column lineage
+      summary: Get a column-lineage graph
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LineageGraph'
+
   /tags/{tag}:
     parameters:
       - $ref: '#/components/parameters/tag'
@@ -697,8 +761,9 @@ components:
       schema:
         type: string
         example: dataset:food_delivery:public.delivery_7_days
-      description: The ID of the node. A node can either be a dataset node or a job node. The format of
-        nodeId for dataset is `dataset:<namespace_of_dataset>:<name_of_the_dataset>` and for job is
+      description: The ID of the node. A node can either be a dataset node, a dataset field node or a job node. 
+        The format of nodeId for dataset is `dataset:<namespace_of_dataset>:<name_of_the_dataset>`, for dataset field 
+        is `datasetField:<namespace_of_dataset>:<name_of_the_dataset>:<name_of_field>`, and for job is
         `job:<namespace_of_the_job>:<name_of_the_job>`.
       required: true
 
@@ -709,6 +774,15 @@ components:
         type: integer
         default: 20
       description: Depth of lineage graph to create.
+      required: false
+
+    withDownstream:
+      name: withDownstream
+      in: query
+      schema:
+        type: boolean
+        default: false
+      description: Determines if downstream lineage should be returned.
       required: false
 
     q:
@@ -739,6 +813,35 @@ components:
         example: name
         description: Sorts the results of your query by `name` or `updated_at`.
       required: false
+
+    sortDirection:
+      name: sortDirection
+      in: query
+      schema:
+        type: string
+        example: name
+        description: Sorts the results of your query by indicated direction `asc` or `desc`.
+      required: false
+
+    before:
+      name: before
+      in: query
+      description: Returns events before passed date.
+      required: false
+      schema:
+        type: string
+        format: date-time
+        example: 2022-09-15T07:47:19Z
+
+    after:
+      name: after
+      in: query
+      description: Returns events after passed date.
+      required: false
+      schema:
+        type: string
+        format: date-time
+        example: 2022-09-15T07:47:19Z
 
   schemas:
     CreatedNamespace:
@@ -790,6 +893,14 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Namespace'
+
+    LineageEventList:
+      type: object
+      properties:
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/LineageEvent'
 
     CreatedSource:
       type: object
@@ -948,7 +1059,9 @@ components:
                 type: string
               tags:
                 description: List of tags.
-                type: string
+                type: array
+                items:
+                  type: string
               description:
                 description: The description of the field.
                 type: string
@@ -957,7 +1070,9 @@ components:
               - type
         tags:
           description: List of tags.
-          type: string
+          type: array
+          items:
+            type: string
         description:
           description: The description of the stream.
           type: string
@@ -1032,7 +1147,7 @@ components:
               tags:
                 description: List of tags.
                 type: array
-                items: 
+                items:
                   type: string
               description:
                 description: The description of the field.
@@ -1492,7 +1607,7 @@ components:
       properties:
         id:
           description: An _optional_ user-provided unique ID of the run. A run ID **must** be an [UUID](https://tools.ietf.org/html/rfc4122).
-                       If an ID for the run is not provided, a random UUID will be generated for the given run.
+            If an ID for the run is not provided, a random UUID will be generated for the given run.
           type: string
           format: uuid
         nominalStartTime:
@@ -1629,7 +1744,7 @@ components:
 
     CustomFacet:
       description: A custom facet enables the extension of _dataset_, _job_, and _run_ metadata. A custom facet **must** also have a schema,
-                   where a version of the schema is identifiable via a URL. A field within the schema **must** not start with an underscore (`_`).
+        where a version of the schema is identifiable via a URL. A field within the schema **must** not start with an underscore (`_`).
       allOf:
         - $ref: '#/components/schemas/BaseFacet'
         - type: object
