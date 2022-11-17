@@ -24,7 +24,7 @@ Before you begin, make sure you have installed:
 First, if you haven't already, clone the Marquez repository and change into the [`examples/airflow`](https://github.com/MarquezProject/marquez/tree/main/examples/airflow) directory:
 
 ```bash
-git clone https://github.com/MarquezProject/marquez && cd examples/airflow
+git clone https://github.com/MarquezProject/marquez && cd marquez/examples/airflow
 ```
 
 To make sure the latest [`openlineage-airflow`](https://pypi.org/project/openlineage-airflow) library is downloaded and installed when starting Airflow, you'll need to create a `requirements.txt` file with the following content:
